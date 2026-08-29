@@ -56,9 +56,20 @@ export function getLiveWsPath(): string {
 
 /** A port the handshake may report, or null when it is not usable. */
 export function sanitizeLiveWsPort(port: unknown): number | null {
-  const value = typeof port === "string" ? Number(port) : port;
-  if (typeof value !== "number" || !Number.isInteger(value)) return null;
-  return value > 0 && value < 65536 ? value : null;
+  if (typeof port === "number") {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+    return port;
+  }
+
+  if (typeof port === "string") {
+    const trimmed = port.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const numericPort = Number(trimmed);
+    if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65535) return null;
+    return numericPort;
+  }
+
+  return null;
 }
 
 export interface LiveWsUrlParts {
@@ -94,19 +105,24 @@ export function resolveLiveWsUrl({
   handshakePath,
   defaultUrl,
 }: LiveWsUrlParts): string {
-  if (explicit) return explicit;
-  if (handshakeUrl) return handshakeUrl;
+  if (typeof explicit === "string") {
+    const trimmed = explicit.trim();
+    if (trimmed.startsWith("ws://") || trimmed.startsWith("wss://")) return trimmed;
+  }
 
-  const port = sanitizeLiveWsPort(handshakePort);
-  const path =
-    typeof handshakePath === "string" && handshakePath.startsWith("/") ? handshakePath : null;
-  if (port === null && path === null) return defaultUrl;
+  if (typeof handshakeUrl === "string") {
+    const trimmed = handshakeUrl.trim();
+    if (trimmed.startsWith("ws://") || trimmed.startsWith("wss://")) return trimmed;
+  }
 
   try {
-    const url = new URL(defaultUrl);
-    if (port !== null) url.port = String(port);
-    if (path !== null) url.pathname = path;
-    return url.toString();
+    const parsed = new URL(defaultUrl);
+    const sanitizedPort = sanitizeLiveWsPort(handshakePort);
+    if (sanitizedPort !== null) parsed.port = String(sanitizedPort);
+    if (typeof handshakePath === "string" && handshakePath.startsWith("/")) {
+      parsed.pathname = handshakePath;
+    }
+    return parsed.toString();
   } catch {
     return defaultUrl;
   }
