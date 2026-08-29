@@ -144,6 +144,21 @@ function extractLastUserText(messages: unknown[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Index of the last `role: "user"` message — the current turn. Clients
+ * resend the full transcript every turn, so an image from an earlier turn
+ * stays in `messages` forever; without this, a request would keep getting
+ * whole-request rerouted to the vision model on every later text-only turn,
+ * never returning to the user's chosen model/combo/auto (#12xxx).
+ */
+function latestUserMessageIndex(messages: unknown[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: unknown } | null | undefined;
+    if (message?.role === "user") return i;
+  }
+  return -1;
+}
+
 export interface VisionBridgeDependencies {
   getSettings?: () => Promise<Record<string, unknown>>;
   callVisionModel?: (
@@ -270,6 +285,16 @@ export class VisionBridgeGuardrail extends BaseGuardrail {
       return { block: false };
     }
 
+    // 8b. Whether the CURRENT turn (the last user message) is the one that
+    // actually carries an image, vs. an image only surviving from an earlier
+    // turn in the resent transcript. Only the former should ever justify
+    // hijacking the model choice (reroute) — an old image must still be
+    // described below so the model can be used at all, but it must not keep
+    // forcing every later, image-free turn onto the vision-bridge target.
+    const currentTurnHasImage = imageParts.some(
+      (part) => part.messageIndex === latestUserMessageIndex(messages)
+    );
+
     // 9. Individual non-combo model with images → optionally REROUTE to best vision-capable model
     // instead of describing images through an intermediate vision call.
     //
@@ -305,7 +330,9 @@ export class VisionBridgeGuardrail extends BaseGuardrail {
     // - "reroute" skips only the keep-credentialed-model guard; the reroute-target
     //   credential guard still applies, and with no usable target it falls through
     //   to describe (raw images must never reach a text-only backend — #8430).
-    if (rerouteEligible && runtime.mode !== "describe") {
+    // currentTurnHasImage additionally gates this: an image left over from an
+    // earlier turn must never re-trigger the reroute, only a genuinely new one.
+    if (rerouteEligible && runtime.mode !== "describe" && currentTurnHasImage) {
       const checkCreds = this.deps.hasUsableCredentials ?? hasUsableCredentialsForModel;
       const originalUsable = runtime.mode === "reroute" ? false : await checkCreds(model);
 
