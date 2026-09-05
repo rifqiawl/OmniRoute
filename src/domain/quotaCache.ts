@@ -17,7 +17,8 @@
  */
 
 import { getUsageForProvider } from "@omniroute/open-sse/services/usage.ts";
-import { getCachedProviderConnectionById, resolveProxyForConnection } from "@/lib/localDb";
+import { getCachedProviderConnectionById } from "@/lib/db/readCache";
+import { resolveProxyForConnection } from "@/lib/db/settings";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
 import { safePercentage } from "@/shared/utils/formatting";
 import {
@@ -37,7 +38,7 @@ import {
   resolveCodexAccount,
   type CodexPersistedQuotaState,
 } from "@omniroute/open-sse/services/codexAccount/index.ts";
-import { getAntigravityQuotaFamily } from "@omniroute/open-sse/services/antigravityQuotaFamily.ts";
+import { selectAntigravityQuotaWindowNames } from "@omniroute/open-sse/services/antigravityQuotaFamily.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -272,37 +273,7 @@ function resolveAntigravityQuotaWindowsForModel(
   quotaNames: string[],
   requestedModel: string
 ): string[] {
-  const requestedFamily = getAntigravityQuotaFamily(requestedModel);
-  const cleanRequestedModel = requestedModel.replace(/^(antigravity|agy)\//, "");
-  const bareModel = cleanRequestedModel.includes("/")
-    ? cleanRequestedModel.slice(cleanRequestedModel.lastIndexOf("/") + 1)
-    : cleanRequestedModel;
-
-  if (requestedFamily === "other") {
-    return quotaNames.filter((windowName) => {
-      const bare = windowName.replace(/^(antigravity|agy)\//, "");
-      return bare === bareModel || bare === cleanRequestedModel;
-    });
-  }
-
-  const familyAggregates =
-    requestedFamily === "gemini"
-      ? ["gemini_weekly"]
-      : requestedFamily === "claude"
-        ? ["claude_gpt_weekly"]
-        : [];
-
-  const exactWindows = quotaNames.filter((windowName) => {
-    const bare = windowName.replace(/^(antigravity|agy)\//, "");
-    return bare === bareModel;
-  });
-  const aggregateWindows = familyAggregates.filter((key) => quotaNames.includes(key));
-  const scoped = [...exactWindows, ...aggregateWindows];
-  if (scoped.length > 0) return scoped;
-
-  return quotaNames.filter(
-    (windowName) => getAntigravityQuotaFamily(windowName) === requestedFamily
-  );
+  return selectAntigravityQuotaWindowNames(quotaNames, requestedModel);
 }
 
 function isAntigravityQuotaExhausted(
